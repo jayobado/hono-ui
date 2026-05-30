@@ -1,0 +1,52 @@
+{
+	"name": "@jayobado/hono-ui",
+	"version": "0.1.0",
+	"license": "MIT",
+
+	"imports": {
+		"@standard-schema/spec": "npm:@standard-schema/spec@^1",
+		"hono": "npm:hono@^4.12.0",
+		"hono/cookie": "npm:hono@^4.12.0/cookie",
+		"@hono/node-server": "npm:@hono/node-server@^1.13.0"
+	},
+
+	"exports": {
+		".": "./src/app/mod.ts",
+		"./middleware": "./src/middleware/mod.ts",
+		"./auth": "./src/auth/mod.ts",
+		"./upstream": "./src/upstream/mod.ts",
+		"./inertia": "./src/inertia/mod.ts",
+		"./route": "./src/route/mod.ts",
+		"./runtime": "./src/runtime/mod.ts",
+		"./runtime/deno": "./src/runtime/deno.ts",
+		"./runtime/node": "./src/runtime/node.ts"
+	},
+
+	"publish": {
+		"include": [
+			"src/",
+			"LICENSE",
+			"README.md",
+			"deno.json"
+		],
+		"exclude": [
+			"src/**/*.test.ts",
+			"src/**/*_test.ts",
+			"design.md"
+		]
+	},
+
+	"tasks": {
+		"check": "deno check src/app/mod.ts src/middleware/mod.ts src/auth/mod.ts src/upstream/mod.ts src/inertia/mod.ts src/route/mod.ts src/health/mod.ts src/runtime/mod.ts",
+		"fmt": "deno fmt src/",
+		"lint": "deno lint src/",
+		"publish:dry": "deno publish --dry-run"
+	},
+
+	"fmt": {
+		"useTabs": true,
+		"lineWidth": 100,
+		"semiColons": false,
+		"singleQuote": true
+	}
+}
