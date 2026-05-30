@@ -1,5 +1,9 @@
 # hono-ui
 
+# hono-ui
+
+[![JSR](https://jsr.io/badges/@jayobado/hono-ui)](https://jsr.io/@jayobado/hono-ui)
+
 A Hono-based toolkit for composing UI and BFF applications. Auth, routes, Inertia.js, upstream HTTP — wired together by a single composer with canonical middleware ordering.
 
 > **Status:** Personal/experimental (v0.1.0). API may change without notice. Use at your own risk.
@@ -37,21 +41,117 @@ Plus middleware factories (`requestId`, `accessLog`, `errorHandler`, `cors`, `bo
 
 ## Installation
 
+### Deno
+
+```sh
+deno add jsr:@jayobado/hono-ui
+```
+
+Pin a version explicitly if you prefer:
+
+```sh
+deno add jsr:@jayobado/hono-ui@^0.1.0
+```
+
+You'll also need Hono itself:
+
 ```jsonc
 // deno.json
 {
   "imports": {
     "@jayobado/hono-ui": "jsr:@jayobado/hono-ui@^0.1.0",
-    "hono": "npm:hono@^4.12.0"
+    "hono": "npm:hono@^4.12.0",
+    "hono/cookie": "npm:hono@^4.12.0/cookie"
   }
 }
 ```
 
-Node:
+For route input validation, add Standard Schema and a compatible validator:
+
+```jsonc
+{
+  "imports": {
+    "@standard-schema/spec": "npm:@standard-schema/spec@^1",
+    "zod": "npm:zod@^3"
+  }
+}
+```
+
+### Node
 
 ```sh
 npm install @jayobado/hono-ui hono @hono/node-server
 ```
+
+`@hono/node-server` is required for `serveNode` (the kit imports it dynamically only when that function is called).
+
+For validation:
+
+```sh
+npm install @standard-schema/spec zod
+```
+
+### Bun
+
+```sh
+bun add @jayobado/hono-ui hono
+```
+
+Bun supports a `Bun.serve(app.fetch)` API. The kit doesn't ship a `serveBun` helper because the pattern is one line:
+
+```ts
+const app = createApp({ ... })
+Bun.serve({ fetch: app.fetch, port: 3000 })
+```
+
+### Cloudflare Workers
+
+Workers don't run long-lived servers — they invoke handlers per request. Hono-ui's `createApp` returns a Hono instance whose `fetch` method is the Workers entry point:
+
+```ts
+import { createApp } from '@jayobado/hono-ui'
+
+const app = createApp({ ... })
+
+export default {
+  fetch: app.fetch,
+}
+```
+
+`serveDeno`, `serveNode`, and `onShutdown` aren't used in Workers — the runtime invokes `fetch` directly and there's no long-running lifecycle to clean up.
+
+For session storage on Workers, use Cloudflare KV or Durable Objects. A minimal KV-backed store:
+
+```ts
+import type { SessionStore, BaseSessionData } from '@jayobado/hono-ui/auth'
+
+function createKvStore<S extends BaseSessionData>(kv: KVNamespace): SessionStore<S> {
+  return {
+    async get(id) {
+      return (await kv.get(id, 'json') as S | null) ?? null
+    },
+    async set(id, data) {
+      await kv.put(id, JSON.stringify(data), { expirationTtl: 60 * 60 * 24 * 7 })
+    },
+    async delete(id) {
+      await kv.delete(id)
+    },
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const auth = createAuth({
+      store: createKvStore(env.SESSIONS),
+      credentials: { toHeaders: (s) => ({ Authorization: `Bearer ${s.accessToken}` }) },
+    })
+    const app = createApp({ auth, /* ... */ })
+    return app.fetch(request, env)
+  },
+}
+```
+
+The factories run on every request, which is fine for small composition. For startup-cost-sensitive cases, move the instantiation to module scope.
 
 ## Quick start: Inertia BFF
 
@@ -440,6 +540,174 @@ const errors = inertia.readErrors({ ctx: c })
 ```
 
 The adapter handles version negotiation, partial reloads, deferred props, flashed errors, SSR slots, and 302→303 conversion for mutating verbs. See [Inertia's docs](https://inertiajs.com/the-protocol) for protocol details.
+
+## Inertia client setup
+
+The server-side adapter (`createInertiaApp`) handles the protocol. The client side is plain Inertia.js with your chosen frontend framework. Two reference setups below.
+
+### React
+
+```sh
+npm install @inertiajs/react react react-dom
+```
+
+```tsx
+// client/main.tsx
+import { createInertiaApp } from '@inertiajs/react'
+import { createRoot } from 'react-dom/client'
+import { resolvePageComponent } from './pages.ts'
+
+createInertiaApp({
+  resolve: (name) => resolvePageComponent(name),
+  setup({ el, App, props }) {
+    createRoot(el).render(<App {...props} />)
+  },
+})
+```
+
+The kit's component naming convention is dot notation (`'orders.show'`). Map these to file imports however suits your project — most apps use Vite's glob import:
+
+```ts
+// client/pages.ts
+import type { ComponentType } from 'react'
+
+const pages = import.meta.glob<{ default: ComponentType }>('./pages/**/*.tsx')
+
+export async function resolvePageComponent(name: string) {
+  // 'orders.show' → './pages/orders/show.tsx'
+  const path = `./pages/${name.replace(/\./g, '/')}.tsx`
+  const loader = pages[path]
+  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  return (await loader()).default
+}
+```
+
+A page component:
+
+```tsx
+// client/pages/orders/show.tsx
+import { Link, usePage } from '@inertiajs/react'
+
+type Order = { id: string; customer: string; total: number }
+
+type Props = {
+  order: Order
+}
+
+export default function ShowOrder({ order }: Props) {
+  const { auth } = usePage().props as { auth: { user: { email: string } | null } }
+
+  return (
+    <div>
+      <h1>Order {order.id}</h1>
+      <p>Customer: {order.customer}</p>
+      <p>Total: ${order.total}</p>
+      {auth.user && <p>Signed in as {auth.user.email}</p>}
+      <Link href="/orders">Back to orders</Link>
+    </div>
+  )
+}
+```
+
+Shared props from the server's `sharedProviders` (in this example, `auth`) appear on `usePage().props` for every page.
+
+### Vue 3
+
+```sh
+npm install @inertiajs/vue3 vue
+```
+
+```ts
+// client/main.ts
+import { createInertiaApp } from '@inertiajs/vue3'
+import { createApp, h, type Component } from 'vue'
+import { resolvePageComponent } from './pages.ts'
+
+createInertiaApp({
+  resolve: (name) => resolvePageComponent(name),
+  setup({ el, App, props, plugin }) {
+    createApp({ render: () => h(App, props) }).use(plugin).mount(el)
+  },
+})
+```
+
+```ts
+// client/pages.ts
+import type { Component } from 'vue'
+
+const pages = import.meta.glob<{ default: Component }>('./pages/**/*.vue')
+
+export async function resolvePageComponent(name: string) {
+  const path = `./pages/${name.replace(/\./g, '/')}.vue`
+  const loader = pages[path]
+  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  return (await loader()).default
+}
+```
+
+A page component:
+
+```vue
+<!-- client/pages/orders/show.vue -->
+<script setup lang="ts">
+import { Link, usePage } from '@inertiajs/vue3'
+
+type Order = { id: string; customer: string; total: number }
+
+defineProps<{ order: Order }>()
+
+const page = usePage()
+const auth = page.props.auth as { user: { email: string } | null }
+</script>
+
+<template>
+  <div>
+    <h1>Order {{ order.id }}</h1>
+    <p>Customer: {{ order.customer }}</p>
+    <p>Total: ${{ order.total }}</p>
+    <p v-if="auth.user">Signed in as {{ auth.user.email }}</p>
+    <Link href="/orders">Back to orders</Link>
+  </div>
+</template>
+```
+
+### The HTML shell
+
+Both frameworks need an HTML entry point that hono-ui's `renderRootView` produces. The server-side `entry` path points to the bundled JS file (Vite produces it from `client/main.tsx` or `client/main.ts`):
+
+```ts
+const inertia = createInertiaApp({
+  version: 'abc12345',
+  renderRootView: renderRootView({ entry: '/assets/main.js' }),
+  sharedProviders: [
+    (c) => ({ auth: { user: auth.getSession(c) ?? null } }),
+  ],
+})
+```
+
+For development, point `entry` at Vite's dev server (`http://localhost:5173/client/main.tsx`). For production, point at the built file (`/assets/main.<hash>.js` derived from your build manifest).
+
+### Build setup
+
+A minimal `vite.config.ts` for either framework:
+
+```ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'  // or @vitejs/plugin-vue
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    manifest: true,
+    rollupOptions: {
+      input: './client/main.tsx',  // or main.ts for Vue
+    },
+    outDir: './dist',
+  },
+})
+```
+
+The manifest output (`dist/.vite/manifest.json`) gives you the hashed asset paths to feed into `renderRootView`'s `entry` option and to derive your Inertia version from.
 
 ## Non-REST protocols
 
