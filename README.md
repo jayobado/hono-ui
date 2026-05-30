@@ -1,3 +1,258 @@
+# hono-ui
+
+A Hono-based toolkit for composing UI and BFF applications. Auth, routes, Inertia.js, upstream HTTP — wired together by a single composer with canonical middleware ordering.
+
+> **Status:** Personal/experimental (v0.1.0). API may change without notice. Use at your own risk.
+
+## What this is
+
+Hono-ui is a kit of composable primitives plus a thin composer. The kit decides the *shape* of a UI/BFF application (which middleware runs in what order, how auth integrates with upstream HTTP, how Inertia mounts); the application fills in the *values* (what cookies look like, which origins to trust, what your routes are).
+
+Built around five primitives:
+
+- **`createAuth`** — OAuth-refresh sessions, cookie I/O, credential relay
+- **`createUpstream`** — HTTP client with auth-aware headers and timeouts
+- **`createRoutes`** — Lightweight route declarations with Standard Schema validation
+- **`createInertiaApp`** — [Inertia.js](https://inertiajs.com) protocol adapter
+- **`createApp`** — The composer that wires everything together
+
+Plus middleware factories (`requestId`, `accessLog`, `errorHandler`, `cors`, `bodyLimit`), runtime helpers (`serveDeno`, `serveNode`, `onShutdown`), and `mountHealth` for conventional `/health`, `/ready`, `/version` endpoints.
+
+## What this isn't
+
+- A full framework. Hono-ui composes Hono apps; it doesn't replace Hono. The composer returns a `Hono` instance you can extend.
+- An ORM, query builder, or database adapter. Bring your own.
+- A frontend bundler. Use Vite, esbuild, or whatever you prefer.
+- Production-ready. This is personal infrastructure shared publicly.
+
+## Design philosophy
+
+**Conventions about shape, not specific values.** The kit declares which middleware exists in the lifecycle and in what order. Applications choose what fills each slot.
+
+**No god-functions.** Each primitive is independent. The composer's behavior is exactly the sum of its inputs — no auto-discovery, no surprise defaults, no version-driven behavior changes.
+
+**Frontend-neutral.** The kit doesn't pick a frontend stack. Inertia integration works with any of Inertia's frontends (Vue, React, Svelte).
+
+**Runtime-portable.** Targets Deno, Node, and Cloudflare Workers (the last via `app.fetch` directly — no `serveCloudflare` helper, since Workers run handlers, not servers).
+
+## Installation
+
+```jsonc
+// deno.json
+{
+  "imports": {
+    "@jayobado/hono-ui": "jsr:@jayobado/hono-ui@^0.1.0",
+    "hono": "npm:hono@^4.12.0"
+  }
+}
+```
+
+Node:
+
+```sh
+npm install @jayobado/hono-ui hono @hono/node-server
+```
+
+## Quick start: Inertia BFF
+
+```ts
+import { createApp, createAuth, createInertiaApp, createRoutes, createUpstream } from '@jayobado/hono-ui'
+import { createMemoryStore } from '@jayobado/hono-ui/auth'
+import { requestId, accessLog, errorHandler, cors, bodyLimit } from '@jayobado/hono-ui/middleware'
+import { renderRootView } from '@jayobado/hono-ui/inertia'
+import { serveDeno, onShutdown } from '@jayobado/hono-ui/runtime'
+
+type AppSession = {
+  userId: string
+  email: string
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number
+}
+
+const auth = createAuth<AppSession>({
+  store: createMemoryStore(),
+  cookie: { name: 'sid', sameSite: 'Lax' },
+  credentials: {
+    toHeaders: (s) => ({ Authorization: `Bearer ${s.accessToken}` }),
+  },
+  refresh: {
+    refresh: async (refreshToken) => {
+      const res = await fetch('https://auth.example.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+      })
+      const data = await res.json()
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresAt: Date.now() + data.expires_in * 1000,
+      }
+    },
+  },
+})
+
+const api = createUpstream({ baseUrl: 'https://api.example.com', auth })
+
+const inertia = createInertiaApp({
+  version: 'abc12345',
+  renderRootView: renderRootView({ entry: '/assets/main.js' }),
+  sharedProviders: [
+    (c) => ({ auth: { user: auth.getSession(c) ?? null } }),
+  ],
+})
+
+const routes = createRoutes()
+
+routes.add({
+  name: 'home',
+  method: 'GET',
+  path: '/',
+  handler: (c) => inertia.render({ ctx: c, component: 'home' }),
+})
+
+routes.group({
+  prefix: '/orders',
+  guards: [auth.require()],
+  routes: (r) => {
+    r.add({
+      name: 'orders.index',
+      method: 'GET',
+      path: '/',
+      handler: async (c) => {
+        const orders = await api.get(c, '/orders')
+        return inertia.render({ ctx: c, component: 'orders.index', props: { orders } })
+      },
+    })
+
+    r.add({
+      name: 'orders.show',
+      method: 'GET',
+      path: '/:id',
+      handler: async (c) => {
+        const order = await api.get(c, `/orders/${c.req.param('id')}`)
+        return inertia.render({ ctx: c, component: 'orders.show', props: { order } })
+      },
+    })
+  },
+})
+
+const app = createApp({
+  middleware: {
+    requestId: requestId(),
+    accessLog: accessLog(),
+    errorHandler: errorHandler(),
+    cors: cors({ origins: ['https://app.example.com'], credentials: true }),
+    bodyLimit: bodyLimit({ max: 1024 * 1024 }),
+  },
+  auth,
+  inertia,
+  routes,
+  health: { version: '1.0.0' },
+})
+
+onShutdown(async () => { /* cleanup */ })
+
+await serveDeno(app, { port: 3000 })
+```
+
+## Quick start: REST API
+
+Same composer, no Inertia, JSON responses:
+
+```ts
+import { createApp, createAuth, createRoutes, createUpstream } from '@jayobado/hono-ui'
+import { createMemoryStore } from '@jayobado/hono-ui/auth'
+import { requestId, accessLog, errorHandler, cors, bodyLimit } from '@jayobado/hono-ui/middleware'
+import { serveDeno } from '@jayobado/hono-ui/runtime'
+import { z } from 'zod'
+
+const auth = createAuth({
+  store: createMemoryStore(),
+  credentials: { toHeaders: (s) => ({ Authorization: `Bearer ${s.accessToken}` }) },
+})
+
+const db = createUpstream({ baseUrl: 'https://db.example.com', auth })
+
+const routes = createRoutes()
+
+routes.group({
+  prefix: '/orders',
+  guards: [auth.require()],
+  routes: (r) => {
+    r.add({
+      name: 'orders.list',
+      method: 'GET',
+      path: '/',
+      handler: async (c) => {
+        const orders = await db.get(c, '/orders')
+        return c.json({ orders })
+      },
+    })
+
+    r.add({
+      name: 'orders.create',
+      method: 'POST',
+      path: '/',
+      input: {
+        body: z.object({
+          customer: z.string().min(1),
+          total: z.number().positive(),
+        }),
+      },
+      handler: async (c, { body }) => {
+        const order = await db.post(c, '/orders', body)
+        return c.json({ order }, 201)
+      },
+    })
+
+    r.add({
+      name: 'orders.show',
+      method: 'GET',
+      path: '/:id',
+      handler: async (c) => {
+        const order = await db.get(c, `/orders/${c.req.param('id')}`)
+        return c.json({ order })
+      },
+    })
+  },
+})
+
+const app = createApp({
+  middleware: {
+    requestId: requestId(),
+    accessLog: accessLog(),
+    errorHandler: errorHandler(),
+    cors: cors({ origins: ['https://app.example.com'] }),
+    bodyLimit: bodyLimit({ max: 1024 * 1024 }),
+  },
+  auth,
+  routes,
+  routesPrefix: '/api',
+  health: { version: '1.0.0' },
+})
+
+await serveDeno(app, { port: 3000 })
+```
+
+The differences from the Inertia example: no `inertia`, route handlers return `c.json(...)` instead of `inertia.render(...)`, and `routesPrefix: '/api'` mounts everything under `/api`.
+
+## The composer
+
+`createApp(config)` returns a Hono app with middleware mounted in canonical order:
+1.  requestId         (correlation ID for everything below)
+2.  errorHandler      (wraps everything below in try/catch)
+3.  accessLog         (logs entry + exit)
+4.  cors              (handle preflights before any handler)
+5.  bodyLimit         (reject too-large bodies early)
+6.  custom            (application-specific, before auth)
+7.  health            (bypasses auth so health checks don't read sessions)
+8.  auth              (loads session, refreshes if needed)
+9.  inertia           (errors + shared bag setup)
+10.  routes           (the application's route table)
+
+
 Each slot is optional. Configure only what you need.
 
 For middleware not covered by the lifecycle slots, use `custom`:
