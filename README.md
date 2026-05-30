@@ -1,7 +1,5 @@
 # hono-ui
 
-# hono-ui
-
 [![JSR](https://jsr.io/badges/@jayobado/hono-ui)](https://jsr.io/@jayobado/hono-ui)
 
 A Hono-based toolkit for composing UI and BFF applications. Auth, routes, Inertia.js, upstream HTTP — wired together by a single composer with canonical middleware ordering.
