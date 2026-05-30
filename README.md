@@ -669,6 +669,97 @@ const auth = page.props.auth as { user: { email: string } | null }
 </template>
 ```
 
+### Vue 3 with render functions
+
+If you prefer render functions over single-file components — for a smaller toolchain, more explicit control, or to avoid the SFC compiler — Vue 3's `h()` API works directly with hono-ui. The setup, page resolution, and shared-data access are identical to the SFC version; only the component file format changes.
+
+```ts
+// client/main.ts
+import { createInertiaApp } from '@inertiajs/vue3'
+import { createApp, h } from 'vue'
+import { resolvePageComponent } from './pages.ts'
+
+createInertiaApp({
+  resolve: (name) => resolvePageComponent(name),
+  setup({ el, App, props, plugin }) {
+    createApp({ render: () => h(App, props) }).use(plugin).mount(el)
+  },
+})
+```
+
+```ts
+// client/pages.ts
+import type { Component } from 'vue'
+
+// Files are .ts instead of .vue
+const pages = import.meta.glob<{ default: Component }>('./pages/**/*.ts')
+
+export async function resolvePageComponent(name: string) {
+  const path = `./pages/${name.replace(/\./g, '/')}.ts`
+  const loader = pages[path]
+  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  return (await loader()).default
+}
+```
+
+A page component:
+
+```ts
+// client/pages/orders/show.ts
+import { defineComponent, h } from 'vue'
+import { Link, usePage } from '@inertiajs/vue3'
+
+type Order = { id: string; customer: string; total: number }
+type AuthUser = { email: string } | null
+
+export default defineComponent({
+  props: {
+    order: { type: Object as () => Order, required: true },
+  },
+  setup(props) {
+    const page = usePage()
+    const auth = () => page.props.auth as { user: AuthUser }
+
+    return () =>
+      h('div', null, [
+        h('h1', null, `Order ${props.order.id}`),
+        h('p', null, `Customer: ${props.order.customer}`),
+        h('p', null, `Total: $${props.order.total}`),
+        auth().user && h('p', null, `Signed in as ${auth().user!.email}`),
+        h(Link, { href: '/orders' }, () => 'Back to orders'),
+      ])
+  },
+})
+```
+
+Reading this against the SFC version, three things are different:
+
+1. **The file is `.ts`, not `.vue`.** No SFC compiler step needed. Vite (or whatever bundler) treats it as plain TypeScript.
+2. **Templates become `h()` calls.** Each element is `h(tag, props, children)`. `Link`, `usePage`, and other Inertia helpers work identically — they're just imported and called from the setup function.
+3. **Props are declared via `defineComponent`.** Type the props explicitly with `Object as () => YourType` since render functions don't have a template compiler to infer them.
+
+The trade-offs are real but small: render functions are more verbose for static-heavy markup; they're equivalent or shorter for dynamic content with conditionals and loops. If you've built UIs with React's JSX or with `h()`-style libraries before, this will feel familiar.
+
+For larger pages, a small helper makes the markup denser:
+
+```ts
+import { h, type VNode } from 'vue'
+
+const div = (props: any, ...children: any[]) => h('div', props, children)
+const p = (...children: any[]) => h('p', null, children)
+const h1 = (text: string) => h('h1', null, text)
+
+// Then:
+return () =>
+  div(null,
+    h1(`Order ${props.order.id}`),
+    p(`Customer: ${props.order.customer}`),
+    p(`Total: $${props.order.total}`),
+  )
+```
+
+The kit doesn't ship these helpers — they're trivial enough to write per-project and the right shape depends on your aesthetic preferences.
+
 ### The HTML shell
 
 Both frameworks need an HTML entry point that hono-ui's `renderRootView` produces. The server-side `entry` path points to the bundled JS file (Vite produces it from `client/main.tsx` or `client/main.ts`):
