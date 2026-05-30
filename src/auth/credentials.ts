@@ -17,6 +17,11 @@ export type CredentialOptions<S extends BaseSessionData = BaseSessionData> = {
 	forwardCookies?: string[]
 }
 
+export type CredentialRelay<S extends BaseSessionData = BaseSessionData> = {
+	headersFor(session: S): Record<string, string>
+	forwardedCookies(ctx: Context): string | null
+}
+
 /**
  * Bound credential relay. Returned from createAuth.
  *
@@ -24,7 +29,8 @@ export type CredentialOptions<S extends BaseSessionData = BaseSessionData> = {
  * requests for the current authenticated user. Also accessible to
  * application code that wants to make ad-hoc upstream calls.
  */
-export function createCredentialRelay<S extends BaseSessionData>(options: CredentialOptions<S>) {
+export function createCredentialRelay<S extends BaseSessionData>(options: CredentialOptions<S>): CredentialRelay<S> {
+
 	return {
 		/**
 		 * Get the credential headers for the current session. Returns null if
@@ -57,6 +63,3 @@ export function createCredentialRelay<S extends BaseSessionData>(options: Creden
 		},
 	}
 }
-
-export type CredentialRelay<S extends BaseSessionData = BaseSessionData> =
-	ReturnType<typeof createCredentialRelay<S>>

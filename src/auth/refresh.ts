@@ -13,7 +13,12 @@ export type RefreshResult = {
 	expiresAt: number
 }
 
-export function createRefreshRunner(options: RefreshOptions) {
+export type RefreshRunner = {
+	shouldRefresh(session: BaseSessionData): boolean
+	run(session: BaseSessionData): Promise<BaseSessionData | null>
+}
+
+export function createRefreshRunner(options: RefreshOptions): RefreshRunner {
 	const graceMs = (options.graceSeconds ?? 60) * 1000
 
 	return {
@@ -40,5 +45,3 @@ export function createRefreshRunner(options: RefreshOptions) {
 		},
 	}
 }
-
-export type RefreshRunner = ReturnType<typeof createRefreshRunner>

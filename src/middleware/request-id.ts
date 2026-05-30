@@ -7,11 +7,7 @@ export type RequestIdOptions = {
 	generator?: () => string
 }
 
-declare module 'hono' {
-	interface ContextVariableMap {
-		requestId: string
-	}
-}
+export const REQUEST_ID_KEY = '__hono_ui_request_id'
 
 /**
  * Attach a request ID to every request.
@@ -21,7 +17,7 @@ declare module 'hono' {
  * (default: crypto.randomUUID).
  *
  * The ID is:
- *   - available as c.get('requestId') for downstream code
+ *   - available as c.get(REQUEST_ID_KEY) for downstream code
  *   - echoed in the same header on the outbound response
  *
  * Pair with access-log for log correlation across the request lifecycle.
@@ -32,7 +28,7 @@ export function requestId(options: RequestIdOptions = {}): MiddlewareHandler {
 
 	return async (ctx, next) => {
 		const id = ctx.req.header(header) ?? generator()
-		ctx.set('requestId', id)
+		ctx.set(REQUEST_ID_KEY, id)
 		ctx.header(header, id)
 		await next()
 	}

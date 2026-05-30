@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { resolve, type ResolverConfig } from './resolve.ts'
-import { sharedMiddleware } from './shared.ts'
+import { sharedMiddleware, SHARED_BAG_KEY } from './shared.ts'
 import {
 	errorsMiddleware,
 	errorsProvider,
@@ -8,6 +8,7 @@ import {
 	addErrors as addErrorsInternal,
 	readErrors as readErrorsInternal,
 	type WireErrors,
+	ERROR_STATE_KEY,
 } from './errors.ts'
 import { Page, type PropValue } from './page.ts'
 
@@ -135,13 +136,13 @@ export function createInertiaApp(cfg: InertiaAppConfig): InertiaInstance {
 
 	// ─── share / shareAll ──────────────────────────────────────────────────
 	const share = (options: ShareOptions): void => {
-		const bag = options.ctx.get('sharedBag')
+		const bag = options.ctx.get(SHARED_BAG_KEY) as Record<string, PropValue> | undefined
 		if (!bag) throw new Error('inertia middleware not mounted')
 		bag[options.key] = options.value
 	}
 
 	const shareAll = (options: ShareAllOptions): void => {
-		const bag = options.ctx.get('sharedBag')
+		const bag = options.ctx.get(SHARED_BAG_KEY) as Record<string, PropValue> | undefined
 		if (!bag) throw new Error('inertia middleware not mounted')
 		for (const [k, v] of Object.entries(options.values)) bag[k] = v
 	}

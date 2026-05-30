@@ -39,11 +39,7 @@ type ErrorState = {
 	bags: Map<string, ErrorBag>     // bag name → field errors
 }
 
-declare module 'hono' {
-	interface ContextVariableMap {
-		errorState: ErrorState
-	}
-}
+export const ERROR_STATE_KEY = '__hono_ui_inertia_errors'
 
 /**
  * Initialize the error state on the context. Run as middleware so any later
@@ -51,7 +47,7 @@ declare module 'hono' {
  */
 export function errorsMiddleware(): MiddlewareHandler {
 	return async (c, next) => {
-		c.set('errorState', { bags: new Map() })
+		c.set(ERROR_STATE_KEY, { bags: new Map() })
 		await next()
 	}
 }
@@ -68,7 +64,7 @@ export function errorsMiddleware(): MiddlewareHandler {
  * a single string.
  */
 export function addError(c: Context, field: string, message: string, bag = 'default'): void {
-	const state = c.get('errorState')
+	const state = c.get(ERROR_STATE_KEY) as ErrorState | undefined
 	if (!state) throw new Error('errorsMiddleware not mounted')
 
 	let target = state.bags.get(bag)
@@ -106,7 +102,7 @@ export function addErrors(c: Context, errors: Record<string, string>, bag = 'def
  *       { default: {...}, password: {...} }
  */
 export function readErrors(c: Context): WireErrors {
-	const state = c.get('errorState')
+	const state = c.get(ERROR_STATE_KEY) as ErrorState | undefined
 	if (!state) return {}
 
 	const bags = state.bags

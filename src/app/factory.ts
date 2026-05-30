@@ -2,7 +2,7 @@ import { Hono, type MiddlewareHandler } from 'hono'
 import type { Auth, BaseSessionData } from '../auth/mod.ts'
 import type { InertiaInstance } from '../inertia/mod.ts'
 import type { Routes } from '../route/mod.ts'
-import { mountHealth, type HealthOptions } from '../health/mod.ts'
+import { mountHealth, type HealthOptions } from './health.ts'
 
 /**
  * Configuration for createApp.

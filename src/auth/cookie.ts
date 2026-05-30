@@ -16,6 +16,12 @@ export type CookieOptions = {
 	maxAge?: number
 }
 
+export type CookieIO = {
+	read(ctx: Context): string | undefined
+	write(ctx: Context, sessionId: string): void
+	clear(ctx: Context): void
+}
+
 const DEFAULTS: Required<Omit<CookieOptions, 'domain'>> = {
 	name: 'sid',
 	path: '/',
@@ -28,7 +34,7 @@ const DEFAULTS: Required<Omit<CookieOptions, 'domain'>> = {
  * Cookie I/O bound to a configuration. Returned from createAuth and used
  * internally; applications don't typically construct this directly.
  */
-export function createCookieIO(options: CookieOptions = {}) {
+export function createCookieIO(options: CookieOptions = {}): CookieIO  {
 	const cfg = { ...DEFAULTS, ...options }
 	const { name, domain, path, sameSite, secure, maxAge } = cfg
 
@@ -53,5 +59,3 @@ export function createCookieIO(options: CookieOptions = {}) {
 		},
 	}
 }
-
-export type CookieIO = ReturnType<typeof createCookieIO>

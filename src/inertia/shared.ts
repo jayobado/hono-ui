@@ -15,15 +15,11 @@ export type SharedProvider = (c: Context) => Record<string, PropValue> | Promise
  * merged into the page on resolve. Equivalent to Laravel's Inertia::share()
  * facade call mid-request.
  *
- * Lives in c.set('shared', ...) so it's request-scoped automatically.
+ * Lives in c.set(SHARED_BAG_KEY, ...) so it's request-scoped automatically.
  */
 type SharedBag = Record<string, PropValue>
 
-declare module 'hono' {
-	interface ContextVariableMap {
-		sharedBag: SharedBag
-	}
-}
+export const SHARED_BAG_KEY = '__hono_ui_inertia_shared'
 
 /**
  * Initialize the per-request bag. Run as the first middleware so any later
@@ -31,7 +27,7 @@ declare module 'hono' {
  */
 export function sharedMiddleware(): MiddlewareHandler {
 	return async (ctx, next) => {
-		ctx.set('sharedBag', {})
+		ctx.set(SHARED_BAG_KEY, {})
 		await next()
 	}
 }
@@ -57,7 +53,7 @@ export async function resolveShared(
 		Object.assign(merged, result)
 	}
 
-	const bag = ctx.get('sharedBag') ?? {}
+	const bag = ctx.get(SHARED_BAG_KEY) as SharedBag | undefined
 	Object.assign(merged, bag)
 
 	return merged

@@ -53,11 +53,7 @@ export type Auth<S extends BaseSessionData = BaseSessionData> = {
 	refresh: RefreshRunner | null
 }
 
-declare module 'hono' {
-	interface ContextVariableMap {
-		session: BaseSessionData | null
-	}
-}
+const SESSION_KEY = '__hono_ui_session'
 
 export function createAuth<S extends BaseSessionData = BaseSessionData>(
 	options: AuthOptions<S>,
@@ -70,14 +66,14 @@ export function createAuth<S extends BaseSessionData = BaseSessionData>(
 	const middleware: MiddlewareHandler = async (ctx, next) => {
 		const sessionId = cookie.read(ctx)
 		if (!sessionId) {
-			ctx.set('session', null)
+			ctx.set(SESSION_KEY, null)
 			await next()
 			return
 		}
 
 		let session = await options.store.get(sessionId)
 		if (!session) {
-			ctx.set('session', null)
+			ctx.set(SESSION_KEY, null)
 			cookie.clear(ctx)
 			await next()
 			return
@@ -97,7 +93,7 @@ export function createAuth<S extends BaseSessionData = BaseSessionData>(
 				// Refresh failed — kill the session
 				await options.store.delete(sessionId)
 				cookie.clear(ctx)
-				ctx.set('session', null)
+				ctx.set(SESSION_KEY, null)
 				await next()
 				return
 			}
@@ -107,7 +103,7 @@ export function createAuth<S extends BaseSessionData = BaseSessionData>(
 			try { await options.onSessionRead(ctx, session) } catch { /* swallow */ }
 		}
 
-		ctx.set('session', session)
+		ctx.set(SESSION_KEY, session)
 		await next()
 	}
 
@@ -124,18 +120,18 @@ export function createAuth<S extends BaseSessionData = BaseSessionData>(
 		const sessionId = cookie.read(ctx)
 		if (sessionId) await options.store.delete(sessionId)
 		cookie.clear(ctx)
-		ctx.set('session', null)
+		ctx.set(SESSION_KEY, null)
 	}
 
 	// ─── getSession ───────────────────────────────────────────────────────
 	const getSession = (ctx: Context): S | null => {
-		return (ctx.get('session') as S | null) ?? null
+		return (ctx.get(SESSION_KEY) as S | null) ?? null
 	}
 
 	// ─── require (guard middleware) ───────────────────────────────────────
 	const require = (opts: { redirectTo?: string } = {}): MiddlewareHandler => {
 		return async (ctx, next) => {
-			const session = ctx.get('session')
+			const session = ctx.get(SESSION_KEY)
 			if (session) {
 				await next()
 				return

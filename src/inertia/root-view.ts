@@ -28,7 +28,15 @@ export type RenderRootViewConfig = {
  * tags, link preload hints), don't extend this — just write your own
  * function with the same signature. It's 30 lines.
  */
-export function renderRootView(cfg: RenderRootViewConfig) {
+export type RenderRootViewFn = (params: {
+	page: PageObject
+	viewData: Record<string, unknown>
+	rootView: string
+	ssrHead?: string
+	ssrBody?: string
+}) => string
+
+export function renderRootView(cfg: RenderRootViewConfig): RenderRootViewFn {
 	return (input: {
 		page: PageObject
 		viewData: Record<string, unknown>
