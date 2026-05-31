@@ -545,9 +545,32 @@ The server-side adapter (`createInertiaApp`) handles the protocol. The client si
 
 ### React
 
-```sh
+**Node:**
+
+`````sh
 npm install @inertiajs/react react react-dom
-```
+`````
+
+**Deno:**
+
+`````sh
+deno add npm:@inertiajs/react npm:react npm:react-dom
+`````
+
+Or pin in `deno.json`:
+
+``````jsonc
+{
+  "imports": {
+    "@inertiajs/react": "npm:@inertiajs/react@^2",
+    "react": "npm:react@^18",
+    "react-dom/client": "npm:react-dom@^18/client"
+  }
+}
+``````
+
+> `.tsx` files work natively in Deno (with `compilerOptions.jsx: "react-jsx"` in `deno.json`). A bundler is still useful for production but not strictly required.
+
 
 ```tsx
 // client/main.tsx
@@ -563,22 +586,30 @@ createInertiaApp({
 })
 ```
 
-The kit's component naming convention is dot notation (`'orders.show'`). Map these to file imports however suits your project — most apps use Vite's glob import:
+The kit's component naming convention is dot notation (`'orders.show'`). Map these to file imports via an explicit page registry — one source of truth for which page names exist:
 
 ```ts
 // client/pages.ts
 import type { ComponentType } from 'react'
 
-const pages = import.meta.glob<{ default: ComponentType }>('./pages/**/*.tsx')
+const pages: Record<string, () => Promise<{ default: ComponentType }>> = {
+  'home':         () => import('./pages/home.tsx'),
+  'orders.index': () => import('./pages/orders/index.tsx'),
+  'orders.show':  () => import('./pages/orders/show.tsx'),
+  'auth.login':   () => import('./pages/auth/login.tsx'),
+}
 
 export async function resolvePageComponent(name: string) {
-  // 'orders.show' → './pages/orders/show.tsx'
-  const path = `./pages/${name.replace(/\./g, '/')}.tsx`
-  const loader = pages[path]
-  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  const loader = pages[name]
+  if (!loader) {
+    const known = Object.keys(pages).join(', ')
+    throw new Error(`Unknown page: '${name}'. Known: ${known}`)
+  }
   return (await loader()).default
 }
 ```
+
+The map is verbose for large apps but explicit — TypeScript knows exactly which page names exist, every page is discoverable from one file, and the setup doesn't depend on bundler-specific features. If you use Vite, the equivalent `import.meta.glob` form works too (see "Bundler-specific shortcuts" below).
 
 A page component:
 
@@ -611,9 +642,31 @@ Shared props from the server's `sharedProviders` (in this example, `auth`) appea
 
 ### Vue 3
 
+**Node:**
+
 ```sh
 npm install @inertiajs/vue3 vue
 ```
+
+**Deno:**
+
+```sh
+deno add npm:@inertiajs/vue3 npm:vue
+```
+
+Or pin in `deno.json`:
+
+````jsonc
+{
+  "imports": {
+    "@inertiajs/vue3": "npm:@inertiajs/vue3@^2",
+    "vue": "npm:vue@^3"
+  }
+}
+````
+
+> Vue 3 single-file components (`.vue`) require a bundler with an SFC compiler — Vite is the most common choice. For a Deno-native setup without a bundler, see "Vue 3 with render functions" below.
+
 
 ```ts
 // client/main.ts
@@ -633,12 +686,19 @@ createInertiaApp({
 // client/pages.ts
 import type { Component } from 'vue'
 
-const pages = import.meta.glob<{ default: Component }>('./pages/**/*.vue')
+const pages: Record<string, () => Promise<{ default: Component }>> = {
+  'home':         () => import('./pages/home.vue'),
+  'orders.index': () => import('./pages/orders/index.vue'),
+  'orders.show':  () => import('./pages/orders/show.vue'),
+  'auth.login':   () => import('./pages/auth/login.vue'),
+}
 
 export async function resolvePageComponent(name: string) {
-  const path = `./pages/${name.replace(/\./g, '/')}.vue`
-  const loader = pages[path]
-  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  const loader = pages[name]
+  if (!loader) {
+    const known = Object.keys(pages).join(', ')
+    throw new Error(`Unknown page: '${name}'. Known: ${known}`)
+  }
   return (await loader()).default
 }
 ```
@@ -673,6 +733,9 @@ const auth = page.props.auth as { user: { email: string } | null }
 
 If you prefer render functions over single-file components — for a smaller toolchain, more explicit control, or to avoid the SFC compiler — Vue 3's `h()` API works directly with hono-ui. The setup, page resolution, and shared-data access are identical to the SFC version; only the component file format changes.
 
+> Render-function pages are plain `.ts` files. This is the path to take for Deno-native projects that want to skip the bundler step entirely — Deno handles the imports directly.
+
+
 ```ts
 // client/main.ts
 import { createInertiaApp } from '@inertiajs/vue3'
@@ -692,12 +755,19 @@ createInertiaApp({
 import type { Component } from 'vue'
 
 // Files are .ts instead of .vue
-const pages = import.meta.glob<{ default: Component }>('./pages/**/*.ts')
+const pages: Record<string, () => Promise<{ default: Component }>> = {
+  'home':         () => import('./pages/home.ts'),
+  'orders.index': () => import('./pages/orders/index.ts'),
+  'orders.show':  () => import('./pages/orders/show.ts'),
+  'auth.login':   () => import('./pages/auth/login.ts'),
+}
 
 export async function resolvePageComponent(name: string) {
-  const path = `./pages/${name.replace(/\./g, '/')}.ts`
-  const loader = pages[path]
-  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  const loader = pages[name]
+  if (!loader) {
+    const known = Object.keys(pages).join(', ')
+    throw new Error(`Unknown page: '${name}'. Known: ${known}`)
+  }
   return (await loader()).default
 }
 ```
@@ -776,7 +846,38 @@ const inertia = createInertiaApp({
 
 For development, point `entry` at Vite's dev server (`http://localhost:5173/client/main.tsx`). For production, point at the built file (`/assets/main.<hash>.js` derived from your build manifest).
 
+### Bundler-specific shortcuts
+
+The explicit page registry above works in any environment. If you use Vite specifically, its `import.meta.glob` extension can replace the manual map:
+
+```ts
+// client/pages.ts (Vite only)
+import type { Component } from 'vue'  // or ComponentType from 'react'
+
+const pages = import.meta.glob<{ default: Component }>('./pages/**/*.vue')
+
+export async function resolvePageComponent(name: string) {
+  const path = `./pages/${name.replace(/\./g, '/')}.vue`
+  const loader = pages[path]
+  if (!loader) throw new Error(`Page not found: ${name} (looked for ${path})`)
+  return (await loader()).default
+}
+```
+
+If you choose this path, add a Vite types reference at the top of the file:
+
+```ts
+/// <reference types="vite/client" />
+```
+
+The trade-off: less maintenance for new pages, but a hard dependency on Vite and slightly weaker compile-time guarantees (TypeScript can't list the valid page names from a glob the way it can from an explicit object literal).
+
+
 ### Build setup
+
+The build step depends on which client path you chose. Two common configurations:
+
+#### Vite (React or Vue SFC)
 
 A minimal `vite.config.ts` for either framework:
 
@@ -797,6 +898,44 @@ export default defineConfig({
 ```
 
 The manifest output (`dist/.vite/manifest.json`) gives you the hashed asset paths to feed into `renderRootView`'s `entry` option and to derive your Inertia version from.
+
+#### Deno-native (Vue render functions, or plain TSX without Vite)
+
+For projects using render-function Vue or plain TSX/TS without an SFC compiler, Deno's built-in bundler covers the basics:
+
+```sh
+deno bundle ./client/main.ts ./dist/main.js
+```
+
+Or use `deno-emit` for more control over the output. For production, you typically want hashed filenames for cache busting — script your bundle command to produce them and write a tiny manifest:
+
+```ts
+// scripts/build.ts
+import { bundle } from 'jsr:@deno/emit'
+
+const result = await bundle('./client/main.ts')
+const hash = await sha256(result.code)
+const filename = `main.${hash.slice(0, 8)}.js`
+
+await Deno.writeTextFile(`./dist/${filename}`, result.code)
+await Deno.writeTextFile('./dist/manifest.json', JSON.stringify({
+  'main.js': filename,
+}))
+```
+
+Then on the server side, read the manifest to construct the entry path:
+
+```ts
+const manifest = JSON.parse(await Deno.readTextFile('./dist/manifest.json'))
+
+const inertia = createInertiaApp({
+  version: manifest['main.js'].split('.')[1],   // the hash segment
+  renderRootView: renderRootView({ entry: `/assets/${manifest['main.js']}` }),
+  // ...
+})
+```
+
+The Deno-native path is more work to set up than Vite, but the toolchain is one runtime — no Node, no esbuild config, no plugins. Worth it if you're already Deno-first.
 
 ## Non-REST protocols
 
